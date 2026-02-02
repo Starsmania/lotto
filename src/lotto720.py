@@ -20,39 +20,52 @@ def run(playwright: Playwright) -> None:
         playwright: Playwright 객체
     """
     # Create browser, context, and page
-    browser = playwright.chromium.launch(headless=True)
+    browser = playwright.chromium.launch(headless=False)
     context = browser.new_context()
     page = context.new_page()
     
+    # Setup alert handler to automatically accept any alerts
+    page.on("dialog", lambda dialog: dialog.accept())
+
     # Perform login using injected page
     login(page)
 
     try:
         # Navigate to the Wrapper Page (TotalGame.jsp) which handles session sync correctly
         print("🚀 Navigating to Lotto 720 Wrapper page...")
-        page.goto("https://el.dhlottery.co.kr/game/TotalGame.jsp?LottoId=LP72", timeout=30000, wait_until="domcontentloaded")
+        page.goto("https://el.dhlottery.co.kr/game/TotalGame.jsp?LottoId=LP72", timeout=30000)
         
+        # Check if we were redirected to login page (session lost)
+        if "/login" in page.url or "method=login" in page.url:
+            print("⚠️ Redirection to login page detected. Attempting to log in again...")
+            login(page)
+            page.goto("https://el.dhlottery.co.kr/game/TotalGame.jsp?LottoId=LP72", timeout=30000)
+
         # Access the game iframe
         # The actual game UI is loaded inside this iframe
         print("Waiting for game iframe to load...")
         # Wait for the iframe element to be visible on the main page
         try:
-            page.locator("#ifrm_tab").wait_for(state="visible", timeout=10000)
+            # Wait for either #ifrm_tab or the main game container
+            page.wait_for_selector("#ifrm_tab", state="visible", timeout=20000)
+            print("✅ Iframe #ifrm_tab found")
         except Exception:
-            print("⚠️ Iframe #ifrm_tab not visible. Page source might be different.")
-        
+            print("⚠️ Iframe #ifrm_tab not visible. Current URL:", page.url)
+            # Take a screenshot for debugging if possible (optional)
+            # page.screenshot(path="lotto720_error.png")
+            
         frame = page.frame_locator("#ifrm_tab")
         
         # Wait for an element inside the frame explicitly to ensure it's ready
         try:
              # Wait for either the hidden balance input OR the visible balance text
-             # This makes it robust if one is missing or slow
-             frame.locator("#curdeposit, .lpdeposit").first.wait_for(state="attached", timeout=20000)
-        except Exception:
-             print("⚠️ Timeout waiting for iframe content. Retrying navigation...")
-             page.reload()
-             page.locator("#ifrm_tab").wait_for(state="visible", timeout=10000)
-             frame.locator("#curdeposit, .lpdeposit").first.wait_for(state="attached", timeout=20000)
+             # Increase timeout for slow iframe loads
+             frame.locator("#curdeposit, .lpdeposit").first.wait_for(state="attached", timeout=30000)
+        except Exception as e:
+             print(f"⚠️ Timeout waiting for iframe content ({e}). Retrying navigation...")
+             page.reload(wait_until="networkidle")
+             page.wait_for_selector("#ifrm_tab", state="visible", timeout=20000)
+             frame.locator("#curdeposit, .lpdeposit").first.wait_for(state="attached", timeout=30000)
 
         print('✅ Navigated to Lotto 720 Game Frame')
         

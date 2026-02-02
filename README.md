@@ -105,6 +105,12 @@ source .venv/bin/activate
 ./scripts/purchase.sh
 ```
 
+-   **특정 복권만 구매하는 옵션**:
+```bash
+./scripts/purchase.sh --645   # 로또 6/45만 구매 (연금복권 스킵)
+./scripts/purchase.sh --720   # 연금복권 720만 구매 (로또 스킵)
+```
+
 ### 4. 자동화 설정 (Systemd 타이머)
 
 Linux 서버 Systemd 이용 매주 일요일 아침 자동 실행 설정

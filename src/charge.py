@@ -35,10 +35,35 @@ def parse_keypad(page: Page) -> dict:
     from PIL import Image, ImageEnhance, ImageFilter
     import io
 
+    # Try to find tesseract if it's not in typical PATH
+    tesseract_cmd = os.environ.get('TESSERACT_PATH')
+    if not tesseract_cmd:
+        # Common locations for tesseract
+        common_paths = [
+            "/usr/local/bin/tesseract",
+            "/opt/homebrew/bin/tesseract",
+            "/usr/bin/tesseract"
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                tesseract_cmd = path
+                break
+    
+    if tesseract_cmd:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+
     # 키패드 이미지 대기
     # Updated from .kpd-layer to .nppfs-keypad based on browser inspection
     keypad_selector = ".nppfs-keypad"
-    page.wait_for_selector(keypad_selector, state="visible")
+    try:
+        page.wait_for_selector(keypad_selector, state="visible", timeout=10000)
+    except Exception:
+        # Check if tesseract is actually available
+        try:
+            pytesseract.get_tesseract_version()
+        except Exception as e:
+            raise Exception(f"Tesseract OCR is not accessible: {e}. Please install tesseract or set TESSERACT_PATH.")
+        raise
     
     # 키패드 버튼들 가져오기
     buttons = page.locator("img.kpd-data")
@@ -187,7 +212,7 @@ def charge_deposit(page: Page, amount: int) -> bool:
     return True
 
 def run(playwright: Playwright, amount: int):
-    browser = playwright.chromium.launch(headless=True)
+    browser = playwright.chromium.launch(headless=False)
     context = browser.new_context()
     page = context.new_page()
     

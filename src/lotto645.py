@@ -102,68 +102,99 @@ def run(playwright: Playwright, auto_games: int, manual_numbers: list) -> None:
         manual_numbers: 수동 구매 번호 리스트 (예: [[1,2,3,4,5,6], ...])
     """
     # Create browser, context, and page
-    browser = playwright.chromium.launch(headless=True)
+    browser = playwright.chromium.launch(headless=False)
     context = browser.new_context()
     page = context.new_page()
     
+    # 0. Setup alert handler to automatically accept any alerts (like session timeout alerts)
+    page.on("dialog", lambda dialog: dialog.accept())
+
     # Perform login
     try:
         login(page)
 
-        # Navigate to game page
-        page.goto(url="https://ol.dhlottery.co.kr/olotto/game/game645.do", timeout=30000, wait_until="domcontentloaded")
-        print('✅ Navigated to Lotto 6/45 page')
-
-        # Wait for page to be fully loaded
-        page.wait_for_load_state("networkidle")
+        # Navigate to the Wrapper Page (TotalGame.jsp) which handles session sync correctly
+        print("🚀 Navigating to Lotto 6/45 Wrapper page...")
+        game_url = "https://el.dhlottery.co.kr/game/TotalGame.jsp?LottoId=LO40"
+        page.goto(game_url, timeout=30000)
         
-        # Remove all intercepting pause layer popups using JavaScript
-        # These elements block clicks even when they're not supposed to be visible
+        # Check if we were redirected to login page (session lost)
+        time.sleep(1) 
+        if "/login" in page.url or "method=login" in page.url:
+            print("⚠️ Redirection detected. Attempting to log in again...")
+            login(page)
+            page.goto(game_url, timeout=30000)
+
+        # Access the game iframe
+        print("Waiting for game iframe to load...")
+        try:
+            page.wait_for_selector("#ifrm_tab", state="visible", timeout=20000)
+            print("✅ Iframe #ifrm_tab found")
+        except Exception:
+            print("⚠️ Iframe #ifrm_tab not visible. Current URL:", page.url)
+            
+        frame = page.frame_locator("#ifrm_tab")
+
+        # Wait for iframe content
+        try:
+             # Wait for a core element inside the frame
+             frame.locator("#num2, #btnSelectNum").first.wait_for(state="attached", timeout=30000)
+        except Exception as e:
+             print(f"⚠️ Timeout waiting for iframe content ({e}). Retrying navigation...")
+             page.reload(wait_until="networkidle")
+             page.wait_for_selector("#ifrm_tab", state="visible", timeout=20000)
+             frame.locator("#num2, #btnSelectNum").first.wait_for(state="attached", timeout=30000)
+
+        print('✅ Navigated to Lotto 6/45 Game Frame')
+
+        # Check if we are logged in on this frame
+        try:
+            user_id_val = frame.locator("input[name='USER_ID']").get_attribute("value")
+            if not user_id_val:
+                print("⚠️ Session not found in frame. Re-verifying...")
+                # Some versions might hide logout button instead
+                if not frame.get_by_text("로그아웃").first.is_visible(timeout=5000):
+                    login(page)
+                    page.goto(game_url, timeout=30000)
+            else:
+                print(f"🔑 Login ID on Game Page: {user_id_val}")
+        except Exception:
+            pass
+
+        # Remove intercepting elements in iframe context
         page.evaluate("""
             () => {
-                // Hide all known pause layer elements
-                const selectors = [
-                    '#pause_layer_pop_02',
-                    '#ele_pause_layer_pop02',
-                    '.pause_layer_pop',
-                    '.pause_bg'
-                ];
-                
-                selectors.forEach(selector => {
-                    const elements = document.querySelectorAll(selector);
-                    elements.forEach(el => {
-                        el.style.display = 'none';
-                        el.style.visibility = 'hidden';
-                        el.style.pointerEvents = 'none';
+                const iframe = document.querySelector('#ifrm_tab');
+                if (iframe && iframe.contentDocument) {
+                    const doc = iframe.contentDocument;
+                    const selectors = ['.pause_layer_pop', '.pause_bg', '#popupLayerAlert'];
+                    selectors.forEach(s => {
+                        doc.querySelectorAll(s).forEach(el => {
+                            el.style.display = 'none';
+                            el.style.pointerEvents = 'none';
+                        });
                     });
-                });
+                }
             }
         """)
-        
-        # Dismiss popup if present - use force to bypass any remaining intercepting elements
-        try:
-            popup_alert = page.locator("#popupLayerAlert")
-            if popup_alert.is_visible(timeout=2000):
-                # Click the confirmation button with force
-                popup_alert.get_by_role("button", name="확인").click(force=True, timeout=5000)
-                print('✅ Dismissed popup alert')
-        except Exception as e:
-            # If popup handling fails, log but continue
-            print(f'⚠️  Popup handling: {str(e)}')
+
+        # Wait for the game interface
+        frame.locator("#num2").wait_for(state="visible", timeout=15000)
+        print("✅ Game interface loaded (#num2 visible)")
 
         # Manual numbers
         if manual_numbers and len(manual_numbers) > 0:
             for game in manual_numbers:
+                print(f"🎰 Adding manual game: {game}")
                 for number in game:
-                    page.click(f'label[for="check645num{number}"]', force=True)
-                page.click("#btnSelectNum")
-                print(f'✅ Manual game added: {game}')
+                    frame.locator(f'label[for="check645num{number}"]').click(force=True)
+                frame.locator("#btnSelectNum").click()
 
         # Automatic games
         if auto_games > 0:
-            page.click("#num2") 
-            page.select_option("#amoundApply", str(auto_games))
-            page.click("#btnSelectNum")
+            frame.locator("#num2").click() 
+            frame.locator("#amoundApply").select_option(str(auto_games))
+            frame.locator("#btnSelectNum").click()
             print(f'✅ Automatic game(s) added: {auto_games}')
 
         # Check if any games were added
@@ -174,7 +205,7 @@ def run(playwright: Playwright, auto_games: int, manual_numbers: list) -> None:
 
         # Verify payment amount
         time.sleep(1)
-        payment_amount_el = page.locator("#payAmt")
+        payment_amount_el = frame.locator("#payAmt")
         payment_text = payment_amount_el.inner_text().strip()
         payment_amount = int(re.sub(r'[^0-9]', '', payment_text))
         expected_amount = total_games * 1000
@@ -184,25 +215,25 @@ def run(playwright: Playwright, auto_games: int, manual_numbers: list) -> None:
             return
         
         # Purchase
-        page.click("#btnBuy")
+        frame.locator("#btnBuy").click()
         
-        # Confirm purchase popup
-        page.click("#popupLayerConfirm input[value='확인']")
+        # Confirm purchase popup (Inside Frame)
+        frame.locator("#popupLayerConfirm input[value='확인']").click()
+
         
         # Check for purchase limit alert or recommendation popup AFTER confirmation
-        # Wait enough time for popup to appear (network lag handling)
         time.sleep(3)
         
         # 1. Check for specific limit exceeded recommendation popup
-        limit_popup = page.locator("#recommend720Plus")
+        limit_popup = frame.locator("#recommend720Plus")
         if limit_popup.is_visible():
             print("❌ Error: Weekly purchase limit exceeded (detected limit popup).")
-            # Try to find error message inside
             content = limit_popup.locator(".cont1").inner_text()
             print(f"   Message: {content.strip()}")
             return
 
         print(f'✅ Lotto 6/45: All {total_games} games purchased successfully!')
+
 
     finally:
         # Cleanup

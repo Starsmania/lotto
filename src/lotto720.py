@@ -54,20 +54,20 @@ def run(playwright: Playwright, sr: ScriptReporter) -> None:
     try:
         # Navigate to the Wrapper Page (TotalGame.jsp) which handles session sync correctly
         print("Navigating to Lotto 720 Wrapper page...")
-        page.goto(GAME_URL, timeout=5000)
+        page.goto(GAME_URL, timeout=30000)
         
         # Check if we were redirected to mobile or login page (session lost)
         if "/login" in page.url or "method=login" in page.url or "m.dhlottery.co.kr" in page.url:
             print(f"Redirection detected (URL: {page.url}). Attempting to log in again...")
             login(page)
-            page.goto(GAME_URL, timeout=5000)
+            page.goto(GAME_URL, timeout=30000)
 
         # Check for logout state on the wrapper page itself
         # The wrapper page usually has a "로그인" button if session is invalid
         if page.get_by_text("로그인", exact=True).first.is_visible(timeout=3000):
              print("Wrapper page shows 'Login' button. Re-logging in...")
              login(page)
-             page.goto(GAME_URL, timeout=5000)
+             page.goto(GAME_URL, timeout=30000)
 
         # Access the game iframe
         # The actual game UI is loaded inside this iframe
@@ -88,12 +88,12 @@ def run(playwright: Playwright, sr: ScriptReporter) -> None:
         try:
              # Wait for either the hidden balance input OR the visible balance text
              # Increase timeout for slow iframe loads
-             frame.locator("#curdeposit, .lpdeposit").first.wait_for(state="attached", timeout=5000)
+             frame.locator("#curdeposit, .lpdeposit").first.wait_for(state="attached", timeout=30000)
         except Exception as e:
              print(f"Timeout waiting for iframe content ({e}). Retrying navigation...")
              page.reload(wait_until="networkidle")
              page.wait_for_selector("#ifrm_tab", state="visible", timeout=20000)
-             frame.locator("#curdeposit, .lpdeposit").first.wait_for(state="attached", timeout=5000)
+             frame.locator("#curdeposit, .lpdeposit").first.wait_for(state="attached", timeout=30000)
 
         print('Navigated to Lotto 720 Game Frame')
         

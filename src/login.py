@@ -124,7 +124,7 @@ def login(page: Page) -> None:
     # 2. Go to login page
     print("Navigating to login page...")
     # Add a cache-busting or view-forcing query param if applicable
-    page.goto("https://www.dhlottery.co.kr/login", timeout=10000, wait_until="domcontentloaded")
+    page.goto("https://www.dhlottery.co.kr/login", timeout=30000, wait_until="domcontentloaded")
     
     # Check for persistent mobile redirection
     if "m.dhlottery.co.kr" in page.url:

@@ -42,12 +42,12 @@ PASSWD = environ.get('PASSWD')
 
 # Constants
 SESSION_PATH = "/tmp/dhlotto_session.json"
-DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-DEFAULT_VIEWPORT = {"width": 1920, "height": 1080}
+DEFAULT_USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Mobile/15E148 Safari/604.1"
+DEFAULT_VIEWPORT = {"width": 393, "height": 852}
 DEFAULT_HEADERS = {
     "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Sec-CH-UA-Mobile": "?0",
-    "Sec-CH-UA-Platform": '"Windows"'
+    "Sec-CH-UA-Mobile": "?1",
+    "Sec-CH-UA-Platform": '"iOS"'
 }
 
 def save_session(context, path=SESSION_PATH):
@@ -91,11 +91,6 @@ def is_logged_in(page: Page) -> bool:
     This is a non-intrusive check.
     """
     try:
-        # If we are on mobile site, we consider ourselves "not logged in (for desktop requirements)"
-        # to trigger the login() flow which handles mobile-to-desktop transition
-        if "m.dhlottery.co.kr" in page.url:
-            return False
-
         if check_logged_in_elements(page, timeout=2000):
             return True
         
@@ -103,18 +98,14 @@ def is_logged_in(page: Page) -> bool:
         if "/login" in page.url or "method=login" in page.url:
              return False
 
-        # Try to navigate to a page that requires login and see if it redirects
-        if page.url == "about:blank" or "dhlottery.co.kr" not in page.url or "common.do?method=main" not in page.url:
-            # Use 'commit' to bypass slow scripts during the identity check
-            page.goto("https://www.dhlottery.co.kr/common.do?method=main", timeout=15000, wait_until="commit")
+        # Try to navigate or check current page for identity
+        if page.url == "about:blank" or "dhlottery.co.kr" not in page.url:
+            # Use 'commit' for speed
+            page.goto("https://m.dhlottery.co.kr/common.do?method=main", timeout=15000, wait_until="commit")
         
-        if check_logged_in_elements(page, timeout=5000):
+        if check_logged_in_elements(page, timeout=3000):
             return True
         
-        # Additional check: if login link is visible, we are definitely NOT logged in
-        if page.get_by_role("link", name=re.compile("로그인")).first.is_visible(timeout=2000):
-            return False
-            
         return False
     except Exception:
         return False
@@ -138,81 +129,54 @@ def login(page: Page) -> None:
 
     print('Starting login process...')
     
-    # 2. Go to login page
-    print("Navigating to login page...")
+    # 2. Go to home page first to establish session
+    print("Navigating to mobile home page...")
     try:
-        # Use wait_until="commit" to return immediately after navigation is accepted,
-        # then we wait for the specific selector we need. This bypasses slow scripts/resources.
-        page.goto("https://www.dhlottery.co.kr/login", timeout=30000, wait_until="commit")
+        page.goto("https://m.dhlottery.co.kr/", timeout=30000, wait_until="networkidle")
         
+        # Click login button on home page
+        print("Clicking login button on home page...")
+        login_btn = page.locator("#loginBtn").first
+        if not login_btn.is_visible(timeout=2000):
+            login_btn = page.get_by_role("link", name=re.compile("로그인")).first
+            
+        if login_btn.is_visible(timeout=5000):
+            login_btn.click()
+        else:
+            # Fallback directly to login page
+            page.goto("https://m.dhlottery.co.kr/user.do?method=login", timeout=20000, wait_until="load")
+            
         # Now wait for the form to be ready
         print("Waiting for login form to appear...")
+        # Subagent confirmed #inpUserId and #inpUserPswdEncn
         page.wait_for_selector("#inpUserId", timeout=20000)
     except Exception as e:
-        print(f"Initial navigation or selector wait failed: {e}")
-        # Take a screenshot to see what's wrong
+        print(f"Navigation or selector wait failed: {e}")
+        # Take a screenshot
         screenshot_path = f"login_nav_failed_{int(time.time())}.png"
         try:
             page.screenshot(path=screenshot_path)
-            print(f"Saved navigation failure screenshot to {screenshot_path}")
         except:
             pass
-        
-        # If we are on mobile site, we can try to proceed
-        if "m.dhlottery.co.kr" in page.url:
-            print("Detected mobile site during navigation. Proceeding to mobile handling...")
-        else:
-             # If it's a real timeout and we're not on the right page, re-raise if not logged in
-             if not check_logged_in_elements(page, timeout=3000):
-                 raise e
+        raise e
     
-    # Check for persistent mobile redirection
-    if "m.dhlottery.co.kr" in page.url:
-        print(f"Warning: Still redirected to mobile site: {page.url}")
-    # 3. Check if we were redirected away from login (means already logged in)
-    if "/login" not in page.url and "method=login" not in page.url:
-        if check_logged_in_elements(page, timeout=5000):
-            # If we are on desktop and logged in, we are good
-            if "m.dhlottery.co.kr" not in page.url:
-                print("Already logged in (redirected from login page)")
-                return
-            else:
-                print("Logged in on mobile site. Attempting to switch to desktop...")
-                page.goto("https://www.dhlottery.co.kr/common.do?method=main", timeout=10000)
-                if "m.dhlottery.co.kr" not in page.url:
-                    return
-
-    # 4. Fill login form
+    # 3. Fill login form
     try:
-        print(f"Checking login form at {page.url}...")
+        print(f"Filling login form at {page.url}...")
         
-        # Wait for selector with improved error message
-        try:
-            page.wait_for_selector("#inpUserId", timeout=10000)
-        except Exception as e:
-            if "m.dhlottery.co.kr" in page.url:
-                print("Mobile site detected. Trying mobile selectors...")
-                # Mobile selectors (based on typical mobile dhlottery pattern)
-                # Usually it's still #userId or similar
-                if page.locator("#userId").is_visible(timeout=2000):
-                    page.locator("#userId").fill(USER_ID)
-                    page.locator("#userPwd").fill(PASSWD)
-                    page.click(".btn_login") # typical mobile login button class
-                    return
-            
-            # Diagnostic info
-            print(f"Selector #inpUserId not found. Current URL: {page.url}")
-            print(f"Page content snippet: {page.content()[:500]}...")
-            raise e
-
-        # Fill ID
-        page.locator("#inpUserId").fill(USER_ID)
-        # Fill Password
-        page.locator("#inpUserPswdEncn").fill(PASSWD)
+        # Determine current input IDs (mobile vs desktop legacy)
+        id_selector = "#userId" if page.locator("#userId").is_visible() else "#inpUserId"
+        pw_selector = "#userPwd" if page.locator("#userPwd").is_visible() else "#inpUserPswdEncn"
         
-        # Click login button
+        page.locator(id_selector).fill(USER_ID)
+        page.locator(pw_selector).fill(PASSWD)
+        
+        # Click login button - mobile often uses .btn_login
         print("Clicking login button...")
-        page.click("#btnLogin")
+        if page.locator(".btn_login").is_visible():
+            page.click(".btn_login")
+        else:
+            page.click("#btnLogin")
     except Exception as e:
         # Debugging: Capture state on failure
         print(f"Login process interrupted: {e}")
@@ -259,20 +223,17 @@ def login(page: Page) -> None:
     time.sleep(2)
     
     # NEW: Sync session with the game subdomain (el.dhlottery.co.kr)
-    # This prevents the 'Timeout' or 'Session lost' issues when moving between subdomains.
+    # Using mobile URLs for synchronization
     try:
         print("Synchronizing session with game subdomain...")
-        # Use wait_until="commit" for fast cross-domain redirection
-        page.goto("https://el.dhlottery.co.kr/common.do?method=sso", timeout=15000, wait_until="commit")
-        # Often visiting a key page helps stabilize the session
-        page.goto("https://el.dhlottery.co.kr/game/TotalGame.jsp?LottoId=LO40", timeout=15000, wait_until="commit")
+        page.goto("https://el.dhlottery.co.kr/common_mobile/do_sso.jsp", timeout=15000, wait_until="commit")
         print("Subdomain session synced.")
     except Exception as e:
         print(f"Subdomain sync warning: {e}")
     
-    # Return to main page
+    # Return to mobile main page
     try:
-        page.goto("https://www.dhlottery.co.kr/common.do?method=main", timeout=15000, wait_until="commit")
+        page.goto("https://m.dhlottery.co.kr/common.do?method=main", timeout=15000, wait_until="commit")
     except:
         pass
 
@@ -288,7 +249,7 @@ def main():
         try:
             print("Launching browser for initial login...")
             HEADLESS = os.environ.get('HEADLESS', 'true').lower() == 'true'
-            browser = playwright.chromium.launch(headless=HEADLESS)
+            browser = playwright.chromium.launch(headless=HEADLESS, slow_mo=0 if HEADLESS else 500)
             context = browser.new_context(
                 user_agent=DEFAULT_USER_AGENT,
                 viewport=DEFAULT_VIEWPORT,

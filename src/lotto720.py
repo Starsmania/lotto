@@ -23,11 +23,11 @@ def run(playwright: Playwright, sr: ScriptReporter) -> None:
     Args:
         playwright: Playwright 객체
     """
-    GAME_URL = "https://el.dhlottery.co.kr/game/TotalGame.jsp?LottoId=LP72"
+    GAME_URL = "https://el.dhlottery.co.kr/game_mobile/pension720/game.jsp"
     
     # Create browser, context, and page
     HEADLESS = environ.get('HEADLESS', 'true').lower() == 'true'
-    browser = playwright.chromium.launch(headless=HEADLESS)
+    browser = playwright.chromium.launch(headless=HEADLESS, slow_mo=0 if HEADLESS else 500)
 
     # Load session if exists
     storage_state = SESSION_PATH if Path(SESSION_PATH).exists() else None
@@ -61,148 +61,96 @@ def run(playwright: Playwright, sr: ScriptReporter) -> None:
         print(f"Priming warning: {e}")
 
     try:
-        # Navigate to the Wrapper Page (TotalGame.jsp) which handles session sync correctly
-        print("Navigating to Lotto 720 Wrapper page...")
-        # Add referer to seem like a natural navigation from the main site
-        page.goto(GAME_URL, timeout=30000, wait_until="commit", referer="https://www.dhlottery.co.kr/")
+        # Navigate to the Game Page directly
+        print(f"Navigating to Lotto 720 mobile game page: {GAME_URL}")
+        page.goto(GAME_URL, timeout=30000, wait_until="commit", referer="https://m.dhlottery.co.kr/")
         
-        # Check if we were redirected to mobile or login page (session lost)
-        if "/login" in page.url or "method=login" in page.url or "m.dhlottery.co.kr" in page.url:
+        # Check if we were redirected to login page (session lost)
+        if "/login" in page.url or "method=login" in page.url:
             print(f"Redirection detected (URL: {page.url}). Attempting to log in again...")
             login(page)
             page.goto(GAME_URL, timeout=30000, wait_until="commit")
 
-        # Check for logout state on the wrapper page itself
-        # The wrapper page usually has a "로그인" button if session is invalid
-        if page.get_by_text("로그인", exact=True).first.is_visible(timeout=3000):
-             print("Wrapper page shows 'Login' button. Re-logging in...")
-             login(page)
-             page.goto(GAME_URL, timeout=30000, wait_until="commit")
-
-        # Access the game iframe
-        # The actual game UI is loaded inside this iframe
-        print("Waiting for game iframe to load...")
-        # Wait for the iframe element to be visible on the main page
-        try:
-            # Wait for either #ifrm_tab or the main game container
-            page.wait_for_selector("#ifrm_tab", state="attached", timeout=20000)
-            print("Iframe #ifrm_tab found")
-        except Exception:
-            print("Iframe #ifrm_tab not visible. Current URL:", page.url)
-            # Take a screenshot for debugging if possible (optional)
-            # page.screenshot(path="lotto720_error.png")
-            
-        frame = page.frame_locator("#ifrm_tab")
-        
-        # Wait for an element inside the frame explicitly to ensure it's ready
-        try:
-             # Wait for either the hidden balance input OR the visible balance text
-             # Increase timeout for slow iframe loads
-             frame.locator("#curdeposit, .lpdeposit").first.wait_for(state="attached", timeout=30000)
-        except Exception as e:
-             print(f"Timeout waiting for iframe content ({e}). Retrying navigation...")
-             page.reload(wait_until="networkidle")
-             page.wait_for_selector("#ifrm_tab", state="visible", timeout=20000)
-             frame.locator("#curdeposit, .lpdeposit").first.wait_for(state="attached", timeout=30000)
-
-        print('Navigated to Lotto 720 Game Frame')
+        # Give it a moment to load components
+        time.sleep(2)
         
         # ----------------------------------------------------
-        # Verify Session & Balance (Inside Frame)
+        # Verify Session & Balance
         # ----------------------------------------------------
-        time.sleep(1)
-
-        # 1. Check Login Session (via hidden input in frame)
-        user_id_val = frame.locator("input[name='USER_ID']").get_attribute("value")
-        if not user_id_val:
-            raise Exception("Session lost: Not logged in on Game Frame (USER_ID empty).")
         
-        print(f"Login ID on Game Page: {user_id_val}")
-
-        # 2. Check Balance (via hidden input #curdeposit in frame)
-        balance_val = frame.locator("#curdeposit").get_attribute("value")
+        # On mobile, we might not have the hidden inputs, so check UI
+        print("Checking balance...")
+        balance_selectors = ["#curdeposit", ".lpdeposit", "#payAmt", ".totalAmt"]
+        current_balance = 0
+        for selector in balance_selectors:
+            el = page.locator(selector).first
+            if el.is_visible(timeout=5000):
+                val = el.inner_text() if not el.get_attribute("value") else el.get_attribute("value")
+                current_balance = int(re.sub(r'[^0-9]', '', val) or '0')
+                print(f"Current Balance: {current_balance:,} KRW (via {selector})")
+                break
         
-        # Fallback to UI element if hidden input isn't populated
-        if not balance_val:
-            balance_text = frame.locator(".lpdeposit").first.inner_text() 
-            balance_val = balance_text.replace(",", "").replace("원", "").strip()
-            
-        try:
-            current_balance = int(balance_val)
-        except ValueError:
-            current_balance = 0
-            print(f"Could not parse balance value: '{balance_val}', assuming 0.")
-
-        print(f"Current Balance on Game Page: {current_balance:,} KRW")
-
+        # If balance check failed but we are on the game page, we might still proceed
+        # or it might be 0.
+        
         if current_balance == 0:
             raise Exception("Deposit is 0 KRW. Cannot proceed with purchase. Please charge your account.")
 
-        # Dismiss popup if present (inside frame)
-        if frame.locator("#popupLayerAlert").is_visible():
-            frame.locator("#popupLayerAlert").get_by_role("button", name="확인").click()
+        # Dismiss popup if present
+        if page.locator("#popupLayerAlert").is_visible():
+            page.locator("#popupLayerAlert").get_by_role("button", name="확인").click()
 
         # Wait for the game UI to load
-        frame.locator(".lotto720_btn_auto_number").wait_for(state="visible", timeout=15000)
+        # Mobile selectors might differ. Common one for auto: .btn_auto, .lotto720_btn_auto_number
+        auto_btn = page.locator(".lotto720_btn_auto_number, .btn_auto, #btnAuto").first
+        auto_btn.wait_for(state="visible", timeout=15000)
 
-        # Remove all intercepting pause layer popups using JavaScript (in iframe context)
+        # Remove all intercepting pause layer popups using JavaScript
         # These elements block clicks even when they're not supposed to be visible
         page.evaluate("""
             () => {
-                const iframe = document.querySelector('#ifrm_tab');
-                if (iframe && iframe.contentDocument) {
-                    const doc = iframe.contentDocument;
-                    // Hide all known pause layer elements
-                    const selectors = [
-                        '#pause_layer_pop_02',
-                        '#ele_pause_layer_pop02',
-                        '.pause_layer_pop',
-                        '.pause_bg'
-                    ];
-                    
-                    selectors.forEach(selector => {
-                        const elements = doc.querySelectorAll(selector);
-                        elements.forEach(el => {
-                            el.style.display = 'none';
-                            el.style.visibility = 'hidden';
-                            el.style.pointerEvents = 'none';
-                        });
+                const doc = document;
+                // Hide all known pause layer elements
+                const selectors = [
+                    '#pause_layer_pop_02',
+                    '#ele_pause_layer_pop02',
+                    '.pause_layer_pop',
+                    '.pause_bg'
+                ];
+                
+                selectors.forEach(selector => {
+                    const elements = doc.querySelectorAll(selector);
+                    elements.forEach(el => {
+                        el.style.display = 'none';
+                        el.style.visibility = 'hidden';
+                        el.style.pointerEvents = 'none';
                     });
-                }
+                });
             }
         """)
 
-        # [자동번호] 클릭 - use force to bypass any remaining intercepting elements
+        # [자동번호] 클릭
         sr.stage("PURCHASE")
-        frame.locator(".lotto720_btn_auto_number").click(force=True)
+        auto_btn.click(force=True)
         
-        time.sleep(2)
-
-        # [선택완료] 클릭
-        frame.locator(".lotto720_btn_confirm_number").click()
-        
-        time.sleep(2)
-
-        # Verify Amount
-        payment_amount_el = frame.locator(".lotto720_price.lpcurpay")
         time.sleep(1)
         
-        payment_amount_text = payment_amount_el.inner_text().strip()
-        payment_val = int(re.sub(r'[^0-9]', '', payment_amount_text) or '0')
-
-        if payment_val != 5000:
-            print(f"Error: Payment mismatch (Expected 5000, Displayed {payment_val})")
-            return
-
+        # [선택완료] 클릭
+        confirm_btn = page.locator(".lotto720_btn_confirm_number, .btn_confirm, #btnConfirm").first
+        confirm_btn.click()
+        
+        time.sleep(1)
+ 
         # [구매하기] 클릭
-        frame.locator("a:has-text('구매하기')").first.click()
+        buy_btn = page.locator("a:has-text('구매하기'), .btn_buy, #btnBuy").first
+        buy_btn.click()
         
         # Handle Confirmation Popup
-        confirm_popup = frame.locator("#lotto720_popup_confirm")
+        confirm_popup = page.locator("#lotto720_popup_confirm, #popupLayerConfirm").first
         confirm_popup.wait_for(state="visible", timeout=5000)
         
         # Click Final Purchase Button
-        confirm_popup.locator("a.btn_blue").click()
+        confirm_popup.locator("a.btn_blue, .btn_confirm_ok, input[value='확인']").first.click()
         
         time.sleep(2)
         print("Lotto 720: All sets purchased successfully!")

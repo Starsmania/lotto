@@ -167,10 +167,27 @@ def charge_deposit(page: Page, amount: int) -> bool:
         return False
 
     print(f"Navigating to charge page for {amount:,} won...")
-    page.goto("https://www.dhlottery.co.kr/mypage/mndpChrg", timeout=30000, wait_until="commit")
+    # Use wait_until="networkidle" to ensure tabs and scripts are loaded
+    # Mobile charge URL
+    page.goto("https://m.dhlottery.co.kr/mypage.do?method=mndpChrg", timeout=30000, wait_until="networkidle")
     
-    # 간편충전 선택
-    page.click("text=간편충전")
+    # Check if we were redirected to login
+    if "/login" in page.url or "method=login" in page.url:
+        print(f"Redirection detected (URL: {page.url}). Attempting to log in again...")
+        login(page)
+        page.goto("https://m.dhlottery.co.kr/mypage.do?method=mndpChrg", timeout=30000, wait_until="networkidle")
+
+    # 간편충전 선택 (Easy Charge tab)
+    # The tab is usually an <li> with id="tab1" or a button containing the text
+    print("Selecting '간편충전' tab...")
+    try:
+        # Try specific button selector first
+        easy_charge_tab = page.locator("li#tab1 button, #tab1 a, button:has-text('간편충전')").first
+        easy_charge_tab.wait_for(state="visible", timeout=10000)
+        easy_charge_tab.click()
+    except Exception as e:
+        print(f"Specific '간편충전' selector failed: {e}. Trying generic text click...")
+        page.click("text=간편충전", timeout=10000)
     
     # 금액 선택
     amount_map = {5000: "5,000", 10000: "10,000", 20000: "20,000"}
@@ -182,13 +199,20 @@ def charge_deposit(page: Page, amount: int) -> bool:
     page.select_option("select#EcAmt", label=f"{amount_map[amount]}원")
     
     # 충전하기 버튼 클릭 (간편충전 하단 버튼)
-    # fn_openEcRegistAccountCheck가 있는 버튼 중 'visible'한 것만 클릭
-    charge_btn = page.locator("button", has_text="충전하기").filter(has=page.locator("xpath=self::*[contains(@onclick, 'fn_openEcRegistAccountCheck')]")).locator("visible=true")
+    # The charge button for '간편충전' is usually a button with class .btn-rec01
+    # Note: there might be a hidden #btnChrg, so we target the visible action button
+    print("Clicking charge button...")
+    charge_btn = page.locator("button.btn-rec01, .btn-rec01").filter(has_text="충전하기").locator("visible=true")
     if charge_btn.count() > 0:
         charge_btn.first.click()
     else:
-        # Fallback: try class based if text fails
-        page.locator(".btn-rec01:visible").first.click()
+        # Fallback to the onclick-based check if class based fails
+        charge_btn = page.locator("button").filter(has=page.locator("xpath=self::*[contains(@onclick, 'fn_openEcRegistAccountCheck')]")).locator("visible=true")
+        if charge_btn.count() > 0:
+            charge_btn.first.click()
+        else:
+            print("Could not find visible charge button. Trying generic selector...")
+            page.locator(".btn-rec01:visible").first.click()
     
     # PIN 키패드 대기
     # Updated selector: .kpd-layer -> .nppfs-keypad
@@ -215,7 +239,8 @@ def charge_deposit(page: Page, amount: int) -> bool:
     return True
 
 def run(playwright: Playwright, amount: int, sr: ScriptReporter):
-    browser = playwright.chromium.launch(headless=True)
+    HEADLESS = os.environ.get('HEADLESS', 'true').lower() == 'true'
+    browser = playwright.chromium.launch(headless=HEADLESS, slow_mo=0 if HEADLESS else 500)
     # Load session if exists
     storage_state = SESSION_PATH if Path(SESSION_PATH).exists() else None
     context = browser.new_context(
@@ -241,6 +266,7 @@ def run(playwright: Playwright, amount: int, sr: ScriptReporter):
             print("Charge failed.")
     except Exception as e:
         print(f"An error occurred: {e}")
+        raise
     finally:
         context.close()
         browser.close()

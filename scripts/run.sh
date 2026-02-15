@@ -66,12 +66,12 @@ else
 fi
 
 # Step 4: Buy Lotto 645
-if [ "$BUY_645" = true ]; then
-    echo "Buying Lotto 645..."
-    "$VENV_PYTHON" "$PROJECT_DIR/src/lotto645.py"
-else
-    echo "Skipping Lotto 645"
-fi
+# if [ "$BUY_645" = true ]; then
+#     echo "Buying Lotto 645..."
+#     "$VENV_PYTHON" "$PROJECT_DIR/src/lotto645.py"
+# else
+#     echo "Skipping Lotto 645"
+# fi
 
 echo ""
 echo "All tasks completed successfully!"

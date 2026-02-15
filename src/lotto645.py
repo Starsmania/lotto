@@ -141,6 +141,7 @@ def run(playwright: Playwright, auto_games: int, manual_numbers: list, sr: Scrip
         try:
             print("Priming session on main domain...")
             page.goto("https://www.dhlottery.co.kr/common.do?method=main", timeout=15000, wait_until="commit")
+            print(f"Current URL: {page.url}")
             time.sleep(1) 
         except Exception as e:
             print(f"Priming warning: {e}")
@@ -150,6 +151,7 @@ def run(playwright: Playwright, auto_games: int, manual_numbers: list, sr: Scrip
         print("Navigating to Lotto 6/45 Wrapper page...")
         game_url = "https://el.dhlottery.co.kr/game/TotalGame.jsp?LottoId=LO40"
         page.goto(game_url, timeout=30000, wait_until="commit", referer="https://www.dhlottery.co.kr/")
+        print(f"Current URL: {page.url}")
         
         # Check if we were redirected to login page (session lost)
         time.sleep(1) 
@@ -158,6 +160,7 @@ def run(playwright: Playwright, auto_games: int, manual_numbers: list, sr: Scrip
             sr.stage("RELOGIN")
             login(page)
             page.goto(game_url, timeout=30000, wait_until="commit")
+            print(f"Current URL: {page.url}")
 
         # Access the game iframe
         sr.stage("IFRAME_LOAD")

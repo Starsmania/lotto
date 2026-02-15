@@ -169,17 +169,15 @@ def charge_deposit(page: Page, amount: int) -> bool:
         return False
 
     print(f"Navigating to charge page for {amount:,} won...")
-    # Use wait_until="networkidle" to ensure tabs and scripts are loaded
-    print(f"Navigating to charge page for {amount:,} won...")
-    # Mobile charge URL
-    page.goto("https://m.dhlottery.co.kr/mypage.do?method=mndpChrg", timeout=30000, wait_until="networkidle")
+    # Correct Mobile charge URL
+    page.goto("https://m.dhlottery.co.kr/mypage/mndpChrg", timeout=30000, wait_until="networkidle")
     print(f"Current URL: {page.url}")
     
     # Check if we were redirected to login
     if "/login" in page.url or "method=login" in page.url:
         print(f"Redirection detected (URL: {page.url}). Attempting to log in again...")
         login(page)
-        page.goto("https://m.dhlottery.co.kr/mypage.do?method=mndpChrg", timeout=30000, wait_until="networkidle")
+        page.goto("https://m.dhlottery.co.kr/mypage/mndpChrg", timeout=30000, wait_until="networkidle")
         print(f"Current URL: {page.url}")
 
     # 간편충전 선택 (Easy Charge tab)

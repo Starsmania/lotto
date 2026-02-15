@@ -58,6 +58,27 @@ def save_session(context, path=SESSION_PATH):
     context.storage_state(path=path)
     print(f"Session saved to {path}")
 
+def setup_dialog_handler(page: Page):
+    """
+    Sets up a robust handler to automatically accept any alerts/dialogs.
+    Avoids 'already handled' errors if multiple handlers are registered.
+    """
+    def handle_dialog(dialog):
+        try:
+            # Check if dialog is already being handled to avoid errors
+            dialog.accept()
+        except Exception as e:
+            # Ignore "already handled" errors which occur if multiple listeners are active
+            if "already handled" in str(e).lower():
+                pass
+            else:
+                print(f"Dialog handling error: {e}")
+    
+    # Mark the page so we don't attach the same handler multiple times
+    if not getattr(page, "_dialog_handler_active", False):
+        page.on("dialog", handle_dialog)
+        setattr(page, "_dialog_handler_active", True)
+
 def dismiss_popups(page: Page):
     """Dismiss common mobile popups that might block clicks."""
     try:
@@ -135,7 +156,7 @@ def login(page: Page) -> None:
         raise ValueError("USER_ID or PASSWD not found in environment variables.")
     
     # Setup alert handler to automatically accept any alerts
-    page.on("dialog", lambda dialog: dialog.accept())
+    setup_dialog_handler(page)
 
     # 1. Quick check if already logged in (now returns False on mobile site)
     if is_logged_in(page):

@@ -10,7 +10,7 @@ from os import environ
 from pathlib import Path
 from dotenv import load_dotenv
 from playwright.sync_api import Playwright, sync_playwright
-from login import login, SESSION_PATH, DEFAULT_USER_AGENT, DEFAULT_VIEWPORT, DEFAULT_HEADERS, GLOBAL_TIMEOUT
+from login import login, SESSION_PATH, DEFAULT_USER_AGENT, DEFAULT_VIEWPORT, DEFAULT_HEADERS, GLOBAL_TIMEOUT, setup_dialog_handler
 
 # .env loading is handled by login module import
 
@@ -126,7 +126,7 @@ def run(playwright: Playwright, auto_games: int, manual_numbers: list, sr: Scrip
     page = context.new_page()
     
     # 0. Setup alert handler to automatically accept any alerts (like session timeout alerts)
-    page.on("dialog", lambda dialog: dialog.accept())
+    setup_dialog_handler(page)
 
     # Perform login only if needed
     from login import is_logged_in

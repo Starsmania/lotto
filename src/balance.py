@@ -25,25 +25,19 @@ def get_balance(page: Page) -> dict:
     if "/login" in page.url or "method=login" in page.url:
         print("Redirection to login page detected. Attempting to log in again...")
         login(page)
-        page.goto("https://m.dhlottery.co.kr/mypage.do?method=home", timeout=GLOBAL_TIMEOUT, wait_until="commit")
+        page.goto("https://m.dhlottery.co.kr/mypage/home", timeout=GLOBAL_TIMEOUT, wait_until="commit")
         print(f"Current URL: {page.url}")
     
     print("Waiting for balance elements...")
-    # Try multiple possible selectors for the balance
-    # #navTotalAmt: header balance (preferred)
-    # #totalAmt: old selector
-    # .pntDpstAmt: specific deposit amount class
     try:
-        # Wait for any of the common indicators
-        page.wait_for_selector("#navTotalAmt, #totalAmt, .pntDpstAmt, #divCrntEntrsAmt", timeout=GLOBAL_TIMEOUT)
+        page.wait_for_selector("#navTotalAmt, .pntDpstAmt", timeout=GLOBAL_TIMEOUT)
     except Exception as e:
-        print(f"Balance selectors not found immediately ({e}). Current page: {page.url}")
-        # diagnostic: if we see login button, we are not logged in
+        print(f"Balance selectors not found immediately. Current page: {page.url}")
         if page.get_by_role("link", name=re.compile("로그인")).first.is_visible():
             raise Exception("Not logged in. Cannot retrieve balance.")
 
     # 1. Get deposit balance (예치금 잔액)
-    deposit_selectors = ["#navTotalAmt", "#totalAmt", ".pntDpstAmt", ".totalAmt"]
+    deposit_selectors = ["#navTotalAmt", ".pntDpstAmt"]
     deposit_text = "0"
     for selector in deposit_selectors:
         el = page.locator(selector).first
@@ -51,12 +45,9 @@ def get_balance(page: Page) -> dict:
             deposit_text = el.inner_text().strip()
             print(f" -> Found deposit balance: '{deposit_text}' (via {selector})")
             break
-    else:
-        print(" -> Warning: No deposit balance selector matched.")
     
     # 2. Get available amount (구매가능)
-    # On mobile, it's often in a different container or the same header
-    available_selectors = ["#divCrntEntrsAmt", "#tooltipTotalAmt", ".pntDpstAmt", ".header_money"]
+    available_selectors = ["#divCrntEntrsAmt", ".header_money"]
     available_text = "0"
     for selector in available_selectors:
         el = page.locator(selector).first
@@ -64,8 +55,6 @@ def get_balance(page: Page) -> dict:
             available_text = el.inner_text().strip()
             print(f" -> Found available amount: '{available_text}' (via {selector})")
             break
-    else:
-        print(" -> Warning: No available amount selector matched.")
     
     # Parse amounts (remove non-digits)
     deposit_balance = int(re.sub(r'[^0-9]', '', deposit_text) or "0")

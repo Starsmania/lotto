@@ -61,19 +61,15 @@ def save_session(context, path=SESSION_PATH):
 def dismiss_popups(page: Page):
     """Dismiss common mobile popups that might block clicks."""
     try:
-        # Check for common close buttons in popups
-        # .btn_close, .close, .popup_close, etc.
-        popups = page.locator(".popupLayer, #common_popup_wrap, .main_popup").locator("visible=true")
-        if popups.count() > 0:
-            print(f"Found {popups.count()} potential popups. Attempting to dismiss...")
-            close_buttons = page.locator(".btn_close, .close, button:has-text('닫기'), a:has-text('오늘 하루 보지 않기')").locator("visible=true")
-            for i in range(close_buttons.count()):
-                try:
-                    close_buttons.nth(i).click(timeout=2000)
-                except:
-                    pass
-    except Exception as e:
-        print(f"Popup dismissal warning: {e}")
+        # On mobile, popups often have specific close buttons
+        close_buttons = page.locator(".btn_close, .close, button:has-text('닫기'), a:has-text('오늘 하루 보지 않기')").locator("visible=true")
+        for i in range(close_buttons.count()):
+            try:
+                close_buttons.nth(i).click(timeout=1000)
+            except:
+                pass
+    except Exception:
+        pass
 
 
 
@@ -119,7 +115,8 @@ def is_logged_in(page: Page) -> bool:
         # Try to navigate or check current page for identity
         if page.url == "about:blank" or "dhlottery.co.kr" not in page.url:
             # Use 'commit' for speed
-            page.goto("https://m.dhlottery.co.kr/common.do?method=main", timeout=GLOBAL_TIMEOUT, wait_until="commit")
+            print("Navigating directly to login page for session check...")
+            page.goto("https://m.dhlottery.co.kr/login", timeout=GLOBAL_TIMEOUT, wait_until="commit")
         
         if check_logged_in_elements(page, timeout=3000):
             return True
@@ -147,56 +144,34 @@ def login(page: Page) -> None:
 
     print('Starting login process...')
     
-    # 2. Go to home page first to establish session
-    print("Navigating to mobile home page...")
-    target_url = "https://m.dhlottery.co.kr/"
+    # 2. Go directly to login page to establish session
+    print("Navigating directly to login page...")
+    target_url = "https://m.dhlottery.co.kr/login"
     try:
-        page.goto(target_url, timeout=GLOBAL_TIMEOUT, wait_until="commit")
+        page.goto(target_url, timeout=GLOBAL_TIMEOUT, wait_until="load")
         print(f"Current URL: {page.url}")
         
-        # New: Dismiss any popups that might block the login button
+        # New: Dismiss any popups that might block the login form
         dismiss_popups(page)
         
-        # Click login button on home page
-        print("Looking for login button on home page...")
-        login_btn = page.locator("#loginBtn").first
-        if not login_btn.is_visible(timeout=3000):
-             # Try other common selectors for mobile login link
-             login_btn = page.get_by_role("link", name=re.compile("로그인")).first
-            
-        if login_btn.is_visible(timeout=GLOBAL_TIMEOUT):
-            print(f"Clicking login button (found via selector)...")
-            # Use force=True if it might be obscured, or just click
-            login_btn.click(timeout=GLOBAL_TIMEOUT)
-        else:
-            print("Login button not visible on home page. Navigating to login URL directly...")
-            page.goto("https://m.dhlottery.co.kr/user.do?method=login", timeout=GLOBAL_TIMEOUT, wait_until="load")
-            
-        print(f"Current URL (after login navigation): {page.url}")
+        print(f"Current URL (login page): {page.url}")
         # Now wait for the form to be ready
         print("Waiting for login form fields to appear...")
-        # Subagent confirmed #inpUserId and #inpUserPswdEncn
-        page.wait_for_selector("#inpUserId", timeout=GLOBAL_TIMEOUT)
+        # Check both mobile and desktop selectors
+        page.wait_for_selector("#userId, #inpUserId", timeout=GLOBAL_TIMEOUT)
     except Exception as e:
         print(f"Navigation or selector wait failed: {e}")
-        # If we failed to click but we can still try direct navigation as a last resort
-        if "m.dhlottery.co.kr" in page.url and "/login" not in page.url:
-            print("Attempting emergency direct navigation to login page...")
-            try:
-                page.goto("https://m.dhlottery.co.kr/user.do?method=login", timeout=GLOBAL_TIMEOUT, wait_until="load")
-                page.wait_for_selector("#inpUserId", timeout=GLOBAL_TIMEOUT)
-            except:
-                raise e
-        else:
-            raise e
+        # Capture state on failure
+        page.screenshot(path=f"login_navigation_failed_{int(time.time())}.png")
+        raise e
     
     # 3. Fill login form
     try:
         print(f"Filling login form at {page.url}...")
         
-        # Determine current input IDs (mobile vs desktop legacy)
-        id_selector = "#userId" if page.locator("#userId").is_visible() else "#inpUserId"
-        pw_selector = "#userPwd" if page.locator("#userPwd").is_visible() else "#inpUserPswdEncn"
+        # Mobile specific input IDs
+        id_selector = "#inpUserId"
+        pw_selector = "#inpUserPswdEncn"
         
         print(f"Entering User ID: {USER_ID[:3]}***")
         page.locator(id_selector).fill(USER_ID)
@@ -204,13 +179,8 @@ def login(page: Page) -> None:
         print("Entering Password: ***")
         page.locator(pw_selector).fill(PASSWD)
         
-        # Click login button - mobile often uses .btn_login
-        if page.locator(".btn_login").is_visible():
-            print("Clicking mobile login button (.btn_login)...")
-            page.click(".btn_login")
-        else:
-            print("Clicking standard login button (#btnLogin)...")
-            page.click("#btnLogin")
+        print("Clicking login button (#btnLogin)...")
+        page.click("#btnLogin")
     except Exception as e:
         # Debugging: Capture state on failure
         print(f"Login process interrupted: {e}")
@@ -256,28 +226,15 @@ def login(page: Page) -> None:
     # Give a bit more time for session cookies to be stable
     time.sleep(2)
     
-    # NEW: Sync session with the game subdomain (el.dhlottery.co.kr)
-    # Using mobile URLs for synchronization
+    # Synchronize session with the game subdomain if needed
     try:
-        print("Synchronizing session with game subdomain (el.dhlottery.co.kr)...")
+        print("Synchronizing session with game subdomains...")
         sync_url = "https://el.dhlottery.co.kr/common_mobile/do_sso.jsp"
-        print(f"Navigating to sync URL: {sync_url}")
         page.goto(sync_url, timeout=GLOBAL_TIMEOUT, wait_until="commit")
-        print(f"Current URL: {page.url}")
-        print("Subdomain session synchronization complete.")
+        print("Session synchronization complete.")
     except Exception as e:
         print(f"Subdomain sync warning: {e}")
     
-    # Return to mobile main page
-    try:
-        print("Returning to mobile home page...")
-        home_url = "https://m.dhlottery.co.kr/common.do?method=main"
-        page.goto(home_url, timeout=GLOBAL_TIMEOUT, wait_until="commit")
-        print(f"Current URL: {page.url}")
-        print("Navigation to home page successful.")
-    except Exception as e:
-        print(f"Home page return warning: {e}")
-
 
 def main():
     """

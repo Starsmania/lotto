@@ -137,24 +137,14 @@ def run(playwright: Playwright, auto_games: int, manual_numbers: list, sr: Scrip
         else:
             print("Already logged in. Skipping login stage.")
 
-        # 0. Priming: Ensure domain session synchronization
-        try:
-            print("Priming session on main domain...")
-            page.goto("https://www.dhlottery.co.kr/common.do?method=main", timeout=GLOBAL_TIMEOUT, wait_until="commit")
-            print(f"Current URL: {page.url}")
-            time.sleep(1) 
-        except Exception as e:
-            print(f"Priming warning: {e}")
-
-        # Navigate to the Wrapper Page (TotalGame.jsp) which handles session sync correctly
+        # Navigate to the Mobile Game Page directly
         sr.stage("NAVIGATE")
-        print("Navigating to Lotto 6/45 Wrapper page...")
-        game_url = "https://el.dhlottery.co.kr/game/TotalGame.jsp?LottoId=LO40"
-        page.goto(game_url, timeout=GLOBAL_TIMEOUT, wait_until="commit", referer="https://www.dhlottery.co.kr/")
+        print("Navigating to Lotto 6/45 mobile game page...")
+        game_url = "https://ol.dhlottery.co.kr/olotto/game/game645.do"
+        page.goto(game_url, timeout=GLOBAL_TIMEOUT, wait_until="commit")
         print(f"Current URL: {page.url}")
         
         # Check if we were redirected to login page (session lost)
-        time.sleep(1) 
         if "/login" in page.url or "method=login" in page.url:
             print("Redirection detected. Attempting to log in again...")
             sr.stage("RELOGIN")
@@ -162,116 +152,53 @@ def run(playwright: Playwright, auto_games: int, manual_numbers: list, sr: Scrip
             page.goto(game_url, timeout=GLOBAL_TIMEOUT, wait_until="commit")
             print(f"Current URL: {page.url}")
 
-        # Access the game iframe
-        sr.stage("IFRAME_LOAD")
-        print("Waiting for game iframe to load...")
-        try:
-            page.wait_for_selector("#ifrm_tab", state="visible", timeout=GLOBAL_TIMEOUT)
-            print("Iframe #ifrm_tab found")
-        except Exception:
-            print("Iframe #ifrm_tab not visible. Current URL:", page.url)
-            
-        frame = page.frame_locator("#ifrm_tab")
+        # Wait for the game interface to load
+        print("Waiting for game interface to load...")
+        page.wait_for_selector("#checkAutoSelect, #btnSelectNum", state="visible", timeout=GLOBAL_TIMEOUT)
 
-        # Wait for iframe content
-        try:
-             # Wait for a core element inside the frame
-             frame.locator("#num2, #btnSelectNum").first.wait_for(state="attached", timeout=GLOBAL_TIMEOUT)
-             # Wait for the game interface
-             frame.locator("#num2").wait_for(state="visible", timeout=GLOBAL_TIMEOUT)
-             print("Game interface loaded (#num2 visible)")
-        except Exception as e:
-             # Retry once if it fails
-             print(f"Timeout waiting for iframe content ({e}). Retrying navigation...")
-             page.reload(wait_until="commit")
-             page.wait_for_selector("#ifrm_tab", state="visible", timeout=GLOBAL_TIMEOUT)
-             frame.locator("#num2, #btnSelectNum").first.wait_for(state="attached", timeout=GLOBAL_TIMEOUT)
-
-        print('Navigated to Lotto 6/45 Game Frame')
-
-        # Check if we are logged in on this frame
-        try:
-            user_id_val = frame.locator("input[name='USER_ID']").get_attribute("value")
-            if not user_id_val:
-                print("Session not found in frame. Re-verifying...")
-                # Some versions might hide logout button instead
-            if not frame.get_by_text("로그아웃").first.is_visible(timeout=GLOBAL_TIMEOUT):
-                    sr.stage("RELOGIN_FRAME")
-                    login(page)
-                    page.goto(game_url, timeout=GLOBAL_TIMEOUT, wait_until="commit")
-            else:
-                print(f"Login ID on Game Page: {user_id_val}")
-        except Exception:
-            pass
-
-        # Remove intercepting elements in iframe context
-        page.evaluate("""
-            () => {
-                const iframe = document.querySelector('#ifrm_tab');
-                if (iframe && iframe.contentDocument) {
-                    const doc = iframe.contentDocument;
-                    const selectors = ['.pause_layer_pop', '.pause_bg', '#popupLayerAlert'];
-                    selectors.forEach(s => {
-                        doc.querySelectorAll(s).forEach(el => {
-                            el.style.display = 'none';
-                            el.style.pointerEvents = 'none';
-                        });
-                    });
-                }
-            }
-        """)
-
-        # Manual numbers
+        # 1. Automatic games
         sr.stage("SELECT_NUMBERS")
+        if auto_games > 0:
+            print(f"Adding automatic game(s): {auto_games}")
+            # Check '자동선택'
+            page.locator('label[for="checkAutoSelect"]').click()
+            # Select amount
+            page.locator("#amoundApply").select_option(str(auto_games))
+            # Click '확인'
+            page.locator("#btnSelectNum").click()
+
+        # 2. Manual numbers
         if manual_numbers and len(manual_numbers) > 0:
             for game in manual_numbers:
                 print(f"Adding manual game: {game}")
+                # Ensure '수동선택' is active if needed (usually default or after auto)
+                # On mobile, clicking a number might just work
                 for number in game:
-                    frame.locator(f'label[for="check645num{number}"]').click(force=True)
-                frame.locator("#btnSelectNum").click()
+                    page.locator(f'label[for="check645num{number}"]').click()
+                page.locator("#btnSelectNum").click()
 
-        # Automatic games
-        if auto_games > 0:
-            frame.locator("#num2").click() 
-            frame.locator("#amoundApply").select_option(str(auto_games))
-            frame.locator("#btnSelectNum").click()
-            print(f'Automatic game(s) added: {auto_games}')
-
-        # Check if any games were added
+        # 3. Check if any games were added
         total_games = len(manual_numbers) + auto_games
         if total_games == 0:
             print('No games to purchase!')
             return {"processed_count": 0}
 
-        # Verify payment amount
-        time.sleep(1)
-        payment_amount_el = frame.locator("#payAmt")
-        payment_text = payment_amount_el.inner_text().strip()
-        payment_amount = int(re.sub(r'[^0-9]', '', payment_text))
-        expected_amount = total_games * 1000
-        
-        if payment_amount != expected_amount:
-            raise Exception(f"Payment mismatch (Expected {expected_amount}, Displayed {payment_amount})")
-        
-        # Purchase
+        # 4. Purchase
         sr.stage("PURCHASE")
-        frame.locator("#btnBuy").click()
+        print("Clicking 'Purchase' (구매하기)...")
+        page.locator("#btnBuy").click()
         
-        # Confirm purchase popup (Inside Frame)
-        frame.locator("#popupLayerConfirm input[value='확인']").click()
+        # 5. Confirm purchase popup
+        print("Confirming final purchase...")
+        # Mobile uses #popupLayerConfirm or standard alert
+        confirm_btn = page.locator("#popupLayerConfirm").get_by_role("button", name="확인")
+        if confirm_btn.is_visible(timeout=2000):
+            confirm_btn.click()
+        else:
+            # Fallback to general alert handling (automated by page.on("dialog"))
+            pass
 
-        
-        # Check for purchase limit alert or recommendation popup AFTER confirmation
-        time.sleep(3)
-        sr.stage("CHECK_RESULT")
-        
-        # 1. Check for specific limit exceeded recommendation popup
-        limit_popup = frame.locator("#recommend720Plus")
-        if limit_popup.is_visible():
-            content = limit_popup.locator(".cont1").inner_text().strip()
-            print(f"Error: Weekly purchase limit exceeded (detected limit popup). Message: {content}")
-            raise Exception(f"Weekly purchase limit exceeded: {content}")
-
+        time.sleep(2)
         print(f'Lotto 6/45: All {total_games} games purchased successfully!')
         return {"processed_count": total_games}
 

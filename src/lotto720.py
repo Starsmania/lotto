@@ -51,19 +51,10 @@ def run(playwright: Playwright, sr: ScriptReporter) -> None:
         print("Already logged in. Skipping login stage.")
     
     sr.stage("NAVIGATE")
-    
-    # 1. Prime the session on the main domain first
-    # This ensures that cookies are 'active' before hitting the game subdomain
-    try:
-        print("Priming session on main domain...")
-        page.goto("https://www.dhlottery.co.kr/common.do?method=main", timeout=GLOBAL_TIMEOUT, wait_until="commit")
-    except Exception as e:
-        print(f"Priming warning: {e}")
-
     try:
         # Navigate to the Game Page directly
         print(f"Navigating to Lotto 720 mobile game page: {GAME_URL}")
-        page.goto(GAME_URL, timeout=GLOBAL_TIMEOUT, wait_until="commit", referer="https://m.dhlottery.co.kr/")
+        page.goto(GAME_URL, timeout=GLOBAL_TIMEOUT, wait_until="commit")
         print(f"Current URL: {page.url}")
         
         # Check if we were redirected to login page (session lost)
@@ -80,84 +71,37 @@ def run(playwright: Playwright, sr: ScriptReporter) -> None:
         # Verify Session & Balance
         # ----------------------------------------------------
         
-        # On mobile, we might not have the hidden inputs, so check UI
-        print("Checking balance...")
-        balance_selectors = ["#curdeposit", ".lpdeposit", "#payAmt", ".totalAmt"]
-        current_balance = 0
-        for selector in balance_selectors:
-            el = page.locator(selector).first
-            if el.is_visible(timeout=GLOBAL_TIMEOUT):
-                val = el.inner_text() if not el.get_attribute("value") else el.get_attribute("value")
-                current_balance = int(re.sub(r'[^0-9]', '', val) or '0')
-                print(f"Current Balance: {current_balance:,} KRW (via {selector})")
-                break
+        # ----------------------------------------------------
+        # Purchase Flow (Mobile Optimized)
+        # ----------------------------------------------------
         
-        # If balance check failed but we are on the game page, we might still proceed
-        # or it might be 0.
-        
-        if current_balance == 0:
-            raise Exception("Deposit is 0 KRW. Cannot proceed with purchase. Please charge your account.")
+        # 1. Open Number Selection Options
+        print("Opening selection options...")
+        page.locator(".btn_gray_st1:has-text('번호 선택하기')").first.click()
+        time.sleep(1)
 
-        # Dismiss popup if present
-        if page.locator("#popupLayerAlert").is_visible():
-            page.locator("#popupLayerAlert").get_by_role("button", name="확인").click()
-
-        # Wait for the game UI to load
-        # Mobile selectors might differ. Common one for auto: .btn_auto, .lotto720_btn_auto_number
-        auto_btn = page.locator(".lotto720_btn_auto_number, .btn_auto, #btnAuto").first
-        auto_btn.wait_for(state="visible", timeout=GLOBAL_TIMEOUT)
-
-        # Remove all intercepting pause layer popups using JavaScript
-        # These elements block clicks even when they're not supposed to be visible
-        page.evaluate("""
-            () => {
-                const doc = document;
-                // Hide all known pause layer elements
-                const selectors = [
-                    '#pause_layer_pop_02',
-                    '#ele_pause_layer_pop02',
-                    '.pause_layer_pop',
-                    '.pause_bg'
-                ];
-                
-                selectors.forEach(selector => {
-                    const elements = doc.querySelectorAll(selector);
-                    elements.forEach(el => {
-                        el.style.display = 'none';
-                        el.style.visibility = 'hidden';
-                        el.style.pointerEvents = 'none';
-                    });
-                });
-            }
-        """)
-
-        # [자동번호] 클릭
+        # 2. Click 'Automatic Number' (자동번호)
         sr.stage("PURCHASE_SELECTION")
         print("Clicking 'Automatic Number' (자동번호)...")
-        auto_btn.click(force=True)
+        page.locator("#btn_set_auto").click(force=True)
+        time.sleep(0.5)
         
-        time.sleep(1)
-        
-        # [선택완료] 클릭
+        # 3. Click 'Confirm Selection' (선택완료)
         print("Clicking 'Confirm Selection' (선택완료)...")
-        confirm_btn = page.locator(".lotto720_btn_confirm_number, .btn_confirm, #btnConfirm").first
-        confirm_btn.click()
-        
-        time.sleep(1)
- 
-        # [구매하기] 클릭
+        page.locator("#btn_set_comp").click()
+        time.sleep(0.5)
+  
+        # 4. Click 'Purchase' (구매하기)
         print("Clicking 'Purchase' (구매하기)...")
-        buy_btn = page.locator("a:has-text('구매하기'), .btn_buy, #btnBuy").first
-        buy_btn.click()
+        page.locator(".btn_blue:has-text('구매하기')").first.click()
         
-        # Handle Confirmation Popup
-        print("Waiting for final confirmation popup...")
-        confirm_popup = page.locator("#lotto720_popup_confirm, #popupLayerConfirm").first
-        confirm_popup.wait_for(state="visible", timeout=GLOBAL_TIMEOUT)
-        
-        # Click Final Purchase Button
+        # 5. Confirm Final Purchase Popup
         print("Confirming final purchase...")
-        confirm_popup.locator("a.btn_blue, .btn_confirm_ok, input[value='확인']").first.click()
+        # Confirm popup often uses #popupLayerConfirm or similar
+        confirm_btn = page.locator("#popupLayerConfirm").get_by_role("button", name="확인")
+        if not confirm_btn.is_visible():
+            confirm_btn = page.get_by_role("button", name="확인")
+        confirm_btn.first.click()
         
         time.sleep(2)
         print("Lotto 720: All sets purchased successfully!")

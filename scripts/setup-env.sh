@@ -57,11 +57,17 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
         # User requested minimal list (Apt -> Arch mapping)
         sudo pacman -S --needed --noconfirm \
             nss nspr at-spi2-core libxkbcommon libxcomposite \
-            libxdamage libxrandr mesa alsa-lib pango cairo gdk-pixbuf2
+            libxdamage libxrandr mesa alsa-lib pango cairo gdk-pixbuf2 \
+            tesseract
     else
         echo "Linux detected: Installing system dependencies for headless browser..."
         echo "Sudo password may be required."
         sudo "$VENV_DIR/bin/playwright" install-deps chromium || echo "Warning: playwright install-deps failed. Continuing anyway..."
+        
+        if command -v apt-get &> /dev/null; then
+            echo "Installing tesseract-ocr for Ubuntu/Debian..."
+            sudo apt-get update && sudo apt-get install -y tesseract-ocr
+        fi
     fi
 fi
 

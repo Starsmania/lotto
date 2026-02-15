@@ -77,34 +77,54 @@ def run(playwright: Playwright, sr: ScriptReporter) -> None:
         
         # 1. Open Number Selection Options
         print("Opening selection options...")
-        page.locator(".btn_gray_st1:has-text('번호 선택하기')").first.click()
-        time.sleep(1)
+        page.locator("a.btn_gray_st1.large.full, a:has-text('번호 선택하기')").first.click()
+        time.sleep(1.5)
 
         # 2. Click 'Automatic Number' (자동번호)
         sr.stage("PURCHASE_SELECTION")
+        
+        # Ensure 'All Jo' (모든조) is selected
+        print("Ensuring 'All Jo' (모든조) is selected...")
+        all_jo_btn = page.locator("li:has-text('모든조'), span.group.all")
+        if all_jo_btn.count() > 0 and all_jo_btn.first.is_visible():
+            all_jo_btn.first.click()
+            time.sleep(0.5)
+
         print("Clicking 'Automatic Number' (자동번호)...")
-        page.locator("#btn_set_auto").click(force=True)
-        time.sleep(0.5)
+        # Selector based on investigation: a.btn_wht.xsmall or text '자동번호'
+        page.locator("a.btn_wht.xsmall:has-text('자동번호'), a:has-text('자동번호')").first.click()
+        
+        # Wait for "Communicating" overlay to disappear if it exists
+        try:
+            # The message "통신중입니다" appears in a central overlay
+            page.wait_for_selector("text=통신중입니다", state="hidden", timeout=5000)
+        except:
+            pass
+        time.sleep(1)
         
         # 3. Click 'Confirm Selection' (선택완료)
         print("Clicking 'Confirm Selection' (선택완료)...")
-        page.locator("#btn_set_comp").click()
-        time.sleep(0.5)
+        page.locator("a.btn_blue.full.large:has-text('선택완료'), a:has-text('선택완료')").first.click()
+        time.sleep(1)
   
         # 4. Click 'Purchase' (구매하기)
         print("Clicking 'Purchase' (구매하기)...")
-        page.locator(".btn_blue:has-text('구매하기')").first.click()
+        page.locator("a.btn_blue.large.full:has-text('구매하기'), a:has-text('구매하기')").first.click()
         
         # 5. Confirm Final Purchase Popup
-        print("Confirming final purchase...")
-        # Confirm popup often uses #popupLayerConfirm or similar
-        confirm_btn = page.locator("#popupLayerConfirm").get_by_role("button", name="확인")
-        if not confirm_btn.is_visible():
-            confirm_btn = page.get_by_role("button", name="확인")
-        confirm_btn.first.click()
+        # Note: Initial confirm dialog is handled by the "dialog" handler
+        print("Checking for final purchase result popup...")
+        try:
+            # Final success/result modal 'Confirm' button
+            final_confirm = page.locator("a.btn_lgray.medium:has-text('확인'), a.btn_blue:has-text('확인'), a:has-text('확인')").first
+            if final_confirm.is_visible(timeout=5000):
+                final_confirm.click()
+                print("Final confirmation clicked.")
+        except:
+            print("No final confirmation popup detected or timeout.")
         
-        time.sleep(2)
-        print("Lotto 720: All sets purchased successfully!")
+        time.sleep(1)
+        print("Lotto 720: Purchase process attempted.")
         
 
     except Exception as e:

@@ -93,10 +93,11 @@ def is_logged_in(page: Page) -> bool:
              return False
 
         # Try to navigate to a page that requires login and see if it redirects
-        if page.url == "about:blank" or "dhlottery.co.kr" not in page.url:
-            page.goto("https://www.dhlottery.co.kr/common.do?method=main", timeout=15000)
-            if check_logged_in_elements(page, timeout=5000):
-                return True
+        if page.url == "about:blank" or "dhlottery.co.kr" not in page.url or "common.do?method=main" not in page.url:
+            page.goto("https://www.dhlottery.co.kr/common.do?method=main", timeout=15000, wait_until="domcontentloaded")
+        
+        if check_logged_in_elements(page, timeout=5000):
+            return True
         
         return False
     except Exception:
@@ -220,6 +221,23 @@ def login(page: Page) -> None:
 
     # Give a bit more time for session cookies to be stable
     time.sleep(2)
+    
+    # NEW: Sync session with the game subdomain (el.dhlottery.co.kr)
+    # This prevents the 'Timeout' or 'Session lost' issues when moving between subdomains.
+    try:
+        print("Synchronizing session with game subdomain...")
+        page.goto("https://el.dhlottery.co.kr/common.do?method=sso", timeout=10000)
+        # Often visiting the main page of the subdomain helps
+        page.goto("https://el.dhlottery.co.kr/game/TotalGame.jsp?LottoId=LO40", timeout=10000, wait_until="domcontentloaded")
+        print("Subdomain session synced.")
+    except Exception as e:
+        print(f"Subdomain sync warning: {e}")
+    
+    # Return to main page to confirm everything is still fine
+    try:
+        page.goto("https://www.dhlottery.co.kr/common.do?method=main", timeout=10000)
+    except:
+        pass
 
 
 def main():
@@ -232,7 +250,8 @@ def main():
     with sync_playwright() as playwright:
         try:
             print("Launching browser for initial login...")
-            browser = playwright.chromium.launch(headless=True)
+            HEADLESS = os.environ.get('HEADLESS', 'true').lower() == 'true'
+            browser = playwright.chromium.launch(headless=HEADLESS)
             context = browser.new_context(
                 user_agent=DEFAULT_USER_AGENT,
                 viewport=DEFAULT_VIEWPORT,

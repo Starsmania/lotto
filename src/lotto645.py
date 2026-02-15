@@ -112,7 +112,8 @@ def run(playwright: Playwright, auto_games: int, manual_numbers: list, sr: Scrip
         dict: 처리 결과 세부 정보 (processed_count 등)
     """
     # Create browser, context, and page
-    browser = playwright.chromium.launch(headless=True)
+    HEADLESS = environ.get('HEADLESS', 'true').lower() == 'true'
+    browser = playwright.chromium.launch(headless=HEADLESS)
 
     # Load session if exists
     storage_state = SESSION_PATH if Path(SESSION_PATH).exists() else None
@@ -136,11 +137,19 @@ def run(playwright: Playwright, auto_games: int, manual_numbers: list, sr: Scrip
         else:
             print("Already logged in. Skipping login stage.")
 
+        # 0. Priming: Ensure domain session synchronization
+        try:
+            print("Priming session on main domain...")
+            page.goto("https://www.dhlottery.co.kr/common.do?method=main", timeout=15000)
+            time.sleep(1) 
+        except Exception as e:
+            print(f"Priming warning: {e}")
+
         # Navigate to the Wrapper Page (TotalGame.jsp) which handles session sync correctly
         sr.stage("NAVIGATE")
         print("Navigating to Lotto 6/45 Wrapper page...")
         game_url = "https://el.dhlottery.co.kr/game/TotalGame.jsp?LottoId=LO40"
-        page.goto(game_url, timeout=30000)
+        page.goto(game_url, timeout=30000, wait_until="domcontentloaded", referer="https://www.dhlottery.co.kr/")
         
         # Check if we were redirected to login page (session lost)
         time.sleep(1) 
@@ -148,7 +157,7 @@ def run(playwright: Playwright, auto_games: int, manual_numbers: list, sr: Scrip
             print("Redirection detected. Attempting to log in again...")
             sr.stage("RELOGIN")
             login(page)
-            page.goto(game_url, timeout=30000)
+            page.goto(game_url, timeout=30000, wait_until="domcontentloaded")
 
         # Access the game iframe
         sr.stage("IFRAME_LOAD")
@@ -186,7 +195,7 @@ def run(playwright: Playwright, auto_games: int, manual_numbers: list, sr: Scrip
                 if not frame.get_by_text("로그아웃").first.is_visible(timeout=5000):
                     sr.stage("RELOGIN_FRAME")
                     login(page)
-                    page.goto(game_url, timeout=30000)
+                    page.goto(game_url, timeout=30000, wait_until="domcontentloaded")
             else:
                 print(f"Login ID on Game Page: {user_id_val}")
         except Exception:

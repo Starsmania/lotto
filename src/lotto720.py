@@ -26,7 +26,8 @@ def run(playwright: Playwright, sr: ScriptReporter) -> None:
     GAME_URL = "https://el.dhlottery.co.kr/game/TotalGame.jsp?LottoId=LP72"
     
     # Create browser, context, and page
-    browser = playwright.chromium.launch(headless=True)
+    HEADLESS = environ.get('HEADLESS', 'true').lower() == 'true'
+    browser = playwright.chromium.launch(headless=HEADLESS)
 
     # Load session if exists
     storage_state = SESSION_PATH if Path(SESSION_PATH).exists() else None
@@ -50,24 +51,33 @@ def run(playwright: Playwright, sr: ScriptReporter) -> None:
         print("Already logged in. Skipping login stage.")
     
     sr.stage("NAVIGATE")
+    
+    # 1. Prime the session on the main domain first
+    # This ensures that cookies are 'active' before hitting the game subdomain
+    try:
+        print("Priming session on main domain...")
+        page.goto("https://www.dhlottery.co.kr/common.do?method=main", timeout=15000)
+    except Exception as e:
+        print(f"Priming warning: {e}")
 
     try:
         # Navigate to the Wrapper Page (TotalGame.jsp) which handles session sync correctly
         print("Navigating to Lotto 720 Wrapper page...")
-        page.goto(GAME_URL, timeout=30000)
+        # Add referer to seem like a natural navigation from the main site
+        page.goto(GAME_URL, timeout=30000, wait_until="domcontentloaded", referer="https://www.dhlottery.co.kr/")
         
         # Check if we were redirected to mobile or login page (session lost)
         if "/login" in page.url or "method=login" in page.url or "m.dhlottery.co.kr" in page.url:
             print(f"Redirection detected (URL: {page.url}). Attempting to log in again...")
             login(page)
-            page.goto(GAME_URL, timeout=30000)
+            page.goto(GAME_URL, timeout=30000, wait_until="domcontentloaded")
 
         # Check for logout state on the wrapper page itself
         # The wrapper page usually has a "로그인" button if session is invalid
         if page.get_by_text("로그인", exact=True).first.is_visible(timeout=3000):
              print("Wrapper page shows 'Login' button. Re-logging in...")
              login(page)
-             page.goto(GAME_URL, timeout=30000)
+             page.goto(GAME_URL, timeout=30000, wait_until="domcontentloaded")
 
         # Access the game iframe
         # The actual game UI is loaded inside this iframe

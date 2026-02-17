@@ -1,0 +1,32 @@
+name: Balance only
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  run-balance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright browsers
+        run: |
+          python -m playwright install --with-deps
+
+      - name: Run balance.py
+        env:
+          USER_ID: ${{ secrets.USER_ID }}
+          PASSWD: ${{ secrets.PASSWD }}
+          CHARGE_PIN: ${{ secrets.CHARGE_PIN }}
+        run: |
+          python src/balance.py
